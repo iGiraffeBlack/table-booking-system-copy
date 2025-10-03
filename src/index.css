@@ -60,7 +60,6 @@ button:focus-visible {
   position: relative;
   display: inline-block; /* shrink to image */
   align-items: center;
-  width: auto;
 }
 
 .floorplan-container img {
