@@ -8,7 +8,7 @@ export default function Floorplan() {
   const { openSidebar, setSelectedTable, setSelectedSeat, setBookingType } = useSidebarStore();
 
   useEffect(() => {
-    fetch("/positions.json")
+    fetch("./positions.json")
       .then(res => res.json())
       .then(data => {
         setTables(data.tables);
@@ -37,7 +37,7 @@ export default function Floorplan() {
       {/* Date Selector */}
       <DateSelector />
       {/* Floorplan image */}
-      <img src="/floorplan_plain3.png" alt="Floorplan" className="block" />
+      <img src="./floorplan_plain3.png" alt="Floorplan" className="block" />
 
       {/* Tables and chairs */}
       {tablesWithBusyness.map(table => (
