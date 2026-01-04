@@ -8,6 +8,9 @@ export const useSidebarStore = create((set) => ({
   closeSidebar: () => set({ isSidebarOpen: false }),
   toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
 
+  selectedDate: new Date().toISOString().split('T')[0],
+  setSelectedDate: (date) => set({ selectedDate: date }),
+
   selectedTable: null,
   setSelectedTable: (tableId) => set({ selectedTable: tableId }),
   clearSelectedTable: () => set({ selectedTable: null }),
@@ -20,7 +23,18 @@ export const useSidebarStore = create((set) => ({
   setBookingType: (type) => set({ bookingType: type }),
   clearBookingType: () => set({ bookingType: "table" }),
 
-  selectedDate: today,
-  setSelectedDate: (date) => set({ selectedDate: date }),
-  clearSelectedDate: () => set({ selectedDate: null }),
+  bookings: [],
+  setBookings: (booking) => set({ bookings: booking }),
+  clearBookings: () => set({ bookings: [] }),
+
+  selectedTimes: [],
+  setSelectedTimes: (times) => set({ selectedTimes: times }),
+  clearSelectedTimes: () => set({ selectedTimes: [] }),
+
+  refreshKey: 0,
+  setRefreshKey: (key) => set({ refreshKey: key }),
+
+  loadingBookings: false,
+  setLoadingBookings: (key) => set({ loadingBookings: key }),
+
 }));

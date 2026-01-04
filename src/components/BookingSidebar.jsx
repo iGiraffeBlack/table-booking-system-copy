@@ -1,16 +1,13 @@
 // src/components/BookingSidebar.jsx
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { FaChair, FaCalendarAlt, FaUser } from 'react-icons/fa';
 import { useSidebarStore } from '../lib/sidebarStore';
 
 export default function BookingSidebar()  {
   const { isSidebarOpen, closeSidebar } = useSidebarStore();
-  const { selectedTable, selectedSeat, bookingType } = useSidebarStore();
+  const { selectedSeat, selectedTable, bookingType, selectedDate, bookings, selectedTimes, setSelectedTimes, refreshKey, setRefreshKey } = useSidebarStore();
 
   const [activeTab, setActiveTab] = useState('datetime');
-  const today = new Date().toISOString().split('T')[0];
-  const [selectedDate, setSelectedDate] = useState(today);
-  const [selectedTimes, setSelectedTimes] = useState([]); // Array for multiple selections
   const [formData, setFormData] = useState({
     name: '',
     telegram: '',
@@ -18,229 +15,264 @@ export default function BookingSidebar()  {
     reason: ''
   });
 
-  // Generate 30-min time slots from 9AM to 9PM
+  useEffect(() => {
+    setActiveTab('datetime');
+  }, [selectedTimes])
+
   const generateTimeSlots = () => {
     const slots = [];
     for (let hour = 9; hour < 21; hour++) {
       for (let min of ['00', '30']) {
-        const time = `${hour.toString().padStart(2, '0')}:${min}`;
+        const time = `${hour.toString().padStart(2,'0')}:${min}`;
         slots.push(time);
       }
     }
     return slots;
   };
 
-  const handleFormChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Any Date';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid Date';
+    return date.toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   };
 
-  const handleSubmit = (e) => {
+  const toDDMMYYYY = (date) => {
+    const d = new Date(date);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0'); // Month is 0-indexed
+    const year = d.getFullYear();
+    return `${day}${month}${year}`;
+  };
+
+  const handleFormChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const add30Minutes = (timeStr) => {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    let totalMinutes = hours*60 + minutes + 30;
+    if (totalMinutes >= 24*60) totalMinutes = 24*60 - 30;
+    const newHours = Math.floor(totalMinutes/60);
+    const newMinutes = totalMinutes % 60;
+    return `${newHours.toString().padStart(2,'0')}:${newMinutes.toString().padStart(2,'0')}`;
+  };
+
+  const formatTimeRange = (times) => {
+    if (times.length === 0) return '';
+    if (times.length === 1) return `${times[0]} - ${add30Minutes(times[0])}`;
+    const sorted = [...times].sort();
+    return `${sorted[0]} - ${add30Minutes(sorted[sorted.length - 1])}`;
+  };
+
+  const areConsecutive = (times) => {
+    if (times.length <= 1) return true;
+    const sorted = [...times].sort();
+    for (let i = 1; i < sorted.length; i++) {
+      const [prevH, prevM] = sorted[i-1].split(':').map(Number);
+      const [currH, currM] = sorted[i].split(':').map(Number);
+      if ((currH*60 + currM) - (prevH*60 + prevM) !== 30) return false;
+    }
+    return true;
+  };
+
+  const expandTimeRange = (range) => {
+    const [start, end] = range.split(" - ");
+
+    let [h, m] = start.split(":").map(Number);
+    const [endH, endM] = end.split(":").map(Number);
+
+    const slots = [];
+
+    while (h < endH || (h === endH && m < endM)) {
+      slots.push(
+        `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
+      );
+
+      m += 30;
+      if (m === 60) {
+        m = 0;
+        h++;
+      }
+    }
+
+    return slots;
+  };
+
+  const bookedSlots = useMemo(() => {
+    if (!selectedDate || (!selectedSeat && !selectedTable)) return new Set();
+
+    const selectedItemId = selectedSeat || selectedTable;
+
+    const targetLabel = selectedItemId.replace("-", " "); 
+    // Table-7 → Table 7, Chair-1 → Chair 1
+
+    const set = new Set();
+
+    bookings.forEach(b => {
+      const sameDate =
+        toDDMMYYYY(b.date) === toDDMMYYYY(selectedDate);
+
+      const sameResource =
+        b.table === targetLabel ||
+        (b.seat && b.seat !== "null" && b.seat === targetLabel);
+
+      if (sameDate && sameResource) {
+        expandTimeRange(b.time).forEach(t => set.add(t));
+      }
+    });
+
+    return set;
+  }, [bookings, selectedDate, selectedTable, selectedSeat]);
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    alert(`Booking Confirmed!
-    Seat: ${selectedSeat}
-    Table: ${selectedTable}
-    Date: ${selectedDate || 'Any'}
-    Times:
-    ${selectedTimes.map(t => `  - ${t}`).join('\n')}
-    Name: ${formData.name}
-    Telegram: ${formData.telegram}
-    Email: ${formData.email}`);
+
+    if (!selectedSeat && !selectedTable) {
+      alert("❌ Please select a table and seat before submitting.");
+      return;
+    }
+    if (selectedTimes.length === 0) {
+      alert("❌ Please select at least one 30-minute time slot.");
+      return;
+    }
+
+    const formattedDate = selectedDate
+      ? new Date(selectedDate).toLocaleDateString('en-US',{ weekday:'long', year:'numeric', month:'long', day:'numeric' })
+      : 'Any Date';
+
+    const timeRange = formatTimeRange(selectedTimes);
+
+    const dateObject = new Date(selectedDate);
+    const day = dateObject.toLocaleDateString('en-SG', {
+      weekday: 'long'
+    })
+
+    const data = {
+      table: selectedTable === null ? "null" : selectedTable,
+      seat: selectedSeat === null ? "null" : selectedSeat,
+      day: day,
+      date: formattedDate,
+      time: timeRange,
+      name: formData.name,
+      telegram: formData.telegram,
+      email: formData.email,
+      reason: formData.reason
     };
 
-  // Handle time selection (toggle off if already selected)
-  const handleTimeSelect = (time) => {
-    setSelectedTime(selectedTime === time ? '' : time);
+    try {
+      const scriptURL = "https://script.google.com/macros/s/AKfycbxSl7Syi_St0MgE9s4uD7AEuiPCcx9mu-rmRxVreg96zkQdxqHcWeZFd15SLkSITWDq/exec";
+      const response = await fetch(scriptURL, {
+        method: "POST",
+        body: JSON.stringify(data)
+      });
+      const result = await response.json();
+
+      if (result.result !== 'success') {
+        alert("❌ Failed to submit booking: " + (result.error || "Unknown error"));
+        return;
+      }
+
+      alert(`✅ Booking Submitted!
+        Booking Type: ${bookingType}
+        Table: ${selectedTable}
+        Date: ${formattedDate}
+        Time: ${timeRange}
+        Name: ${formData.name}
+        Telegram: ${formData.telegram}
+        Email: ${formData.email}`);
+
+      setFormData({ name:'', telegram:'', email:'', reason:'' });
+      setSelectedTimes([]);
+      setRefreshKey(prev => prev + 1);
+    } catch (error) {
+      console.error("Error submitting booking:", error);
+      alert("❌ Failed to submit booking: " + error.message);
+    }
   };
 
-  const categories = bookingType === "table"
-  ? ["DIP", "FYP", "Flagship"]
-  : ["Individual"];
+  const categories = bookingType === 'table' ? ["DIP","FYP","Flagship"] : ["Individual"];
 
   return (
     <div style={styles.container}>
-      {/* Header with Close Button */}
-    <div style={styles.header}>
-      <span style={styles.headerTitle}>Booking</span>
-      <button style={styles.closeButton} onClick={closeSidebar}>
-        ✖
-      </button>
-    </div>
+      <div style={styles.header}>
+        <span style={styles.headerTitle}>Booking</span>
+        <button style={styles.closeButton} onClick={closeSidebar}>✖</button>
+      </div>
 
-      {/* Tab Content */}
       <div style={styles.content}>
-        {activeTab === 'datetime' && (
-  <div>
-    <h3 style={styles.heading}>📅 Choose A Timeslot</h3>
-    <div style={styles.datetimeContainer}>
-      <div style={styles.timeSlots}>
-        <h4>Select Up to 5 Time Slots:</h4>
-        <div style={styles.timeGrid}>
-          {generateTimeSlots().map(time => {
-            const isSelected = selectedTimes.includes(time);
-            return (
-              <button
-                key={time}
-                style={{
-                  ...styles.timeButton,
-                  ...(isSelected ? styles.selectedTime : {})
-                }}
-                onClick={() => {
-                  if (isSelected) {
-                    // Unselect
-                    setSelectedTimes(selectedTimes.filter(t => t !== time));
-                  } else {
-                    // Select only if under limit
-                    if (selectedTimes.length < 5) {
-                      setSelectedTimes([...selectedTimes, time]);
-                    } else {
-                      alert("You can select up to 5 time slots only.");
-                    }
-                  }
-                }}
-              >
-                {time}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "1rem" }}>
-        <button
-          style={{
-            padding: "0.5rem 1rem",
-            backgroundColor: selectedTimes.length === 0 ? "#ccc" : "#007bff",
-            color: "white",
-            border: "none",
-            borderRadius: "5px",
-            cursor: selectedTimes.length === 0 ? "not-allowed" : "pointer",
-            opacity: selectedTimes.length === 0 ? 0.7 : 1
-          }}
-          disabled={selectedTimes.length === 0}
-          onClick={() => setActiveTab('info')}
-        >
-          Next →
-        </button>
-      </div>
-    </div>
-    
+        {activeTab==='datetime' && (
+          <div>
+            <h3 style={styles.heading}>📅 Choose Time</h3>
+            {selectedDate && <div style={styles.selectedDateDisplay}><strong>Date:</strong> {formatDate(selectedDate)}</div>}
+            <div style={styles.timeSlots}>
+              <h4>Select up to 5 consecutive 30-min slots:</h4>
+              <div style={styles.timeGrid}>
+                {generateTimeSlots().map(time => {
+                  const isSelected = selectedTimes.includes(time);
+                  const isBooked = bookedSlots.has(time);
+                  return (
+                    <button 
+                    key={time} 
+                    disabled={isBooked}
+                    style={{
+                      ...styles.timeButton,
+                      ...(isSelected?styles.selectedTime:{}),
+                      ...(isBooked?styles.disabledTime:{})
+                    }}
+                      onClick={() => {
+                        if (isBooked) return;
+                        if (isSelected) setSelectedTimes(selectedTimes.filter(t=>t!==time));
+                        else {
+                          const newSel = [...selectedTimes,time].sort();
+                          if (newSel.length>5) { alert("Maximum 5 slots."); return; }
+                          if (!areConsecutive(newSel)) { alert("Slots must be consecutive."); return; }
+                          setSelectedTimes(newSel);
+                        }
+                      }}>{time}</button>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )}
 
-    {/* Show selected times */}
-    {selectedTimes.length > 0 && (
-      <div style={styles.selectedText}>
-        <strong>Selected Times:</strong>
-        <ul style={{ paddingLeft: '1.2rem', margin: '0.5rem 0' }}>
-          {selectedTimes.map((t, i) => (
-            <li key={i}>{selectedDate || 'Any Date'} at {t}</li>
-          ))}
-        </ul>
-      </div>
-    )}
-  </div>
-)}
-
-        {activeTab === 'info' && (
+        {activeTab==='info' && (
           <div>
             <h3 style={styles.heading}>👤 Enter Your Info</h3>
             <form onSubmit={handleSubmit} style={styles.form}>
               <div style={styles.formGroup}>
-                <label style={styles.label}>
-                  Name:
-                  <input
-                    type="text"
-                    name="name"
-                    value={formData.name}
-                    onChange={handleFormChange}
-                    required
-                    style={styles.input}
-                  />
+                <label style={styles.label}>Name:
+                  <input type="text" name="name" value={formData.name} onChange={handleFormChange} required style={styles.input}/>
                 </label>
               </div>
-
               <div style={styles.formGroup}>
-                <label style={styles.label}>
-                  Telegram Handle:
-                  <input
-                    type="text"
-                    name="telegram"
-                    value={formData.telegram}
-                    onChange={handleFormChange}
-                    placeholder="@username"
-                    required
-                    style={styles.input}
-                  />
+                <label style={styles.label}>Telegram Handle:
+                  <input type="text" name="telegram" value={formData.telegram} onChange={handleFormChange} placeholder="@username" required style={styles.input}/>
                 </label>
               </div>
-
               <div style={styles.formGroup}>
-                <label style={styles.label}>
-                  Email:
-                  <input
-                    type="email"
-                    name="email"
-                    value={formData.email}
-                    onChange={handleFormChange}
-                    required
-                    style={styles.input}
-                  />
+                <label style={styles.label}>Email:
+                  <input type="email" name="email" value={formData.email} onChange={handleFormChange} required style={styles.input}/>
                 </label>
               </div>
-
               <div style={styles.formGroup}>
-                <label style={styles.label}>
-                  Reason for Booking:
-                  <select
-                    name="category"
-                    value={formData.categories}
-                    onChange={handleFormChange}
-                    required
-                    style={styles.input}
-                  >
-                    <option value="" disabled>
-                      -- choose an option --
-                    </option>
-                    {categories.map(cat => (
-                      <option key={cat} value={cat.toLowerCase()}>
-                        {cat}
-                      </option>
-                    ))}
-                    </select>
+                <label style={styles.label}>Reason for Booking:
+                  <select name="reason" value={formData.reason} onChange={handleFormChange} required style={styles.input}>
+                    <option value="" disabled>-- choose an option --</option>
+                    {categories.map(cat=><option key={cat} value={cat.toLowerCase()}>{cat}</option>)}
+                  </select>
                 </label>
               </div>
-
-              <button type="submit" style={styles.submitButton}>
-                ✅ Confirm Booking
-              </button>
+              <button type="submit" style={styles.submitButton}>✅ Confirm Booking</button>
             </form>
           </div>
         )}
       </div>
-      {/* Sidebar Header Tabs */}
+
       <div style={styles.tabs}>
-        <button
-          style={{
-            ...styles.tabButton,
-            ...(activeTab === 'datetime' ? styles.activeTab : {})
-          }}
-          onClick={() => setActiveTab('datetime')}
-          title="Choose Date & Time"
-        >
-          <FaCalendarAlt />
-        </button>
-        <button
-          style={{
-            ...styles.tabButton,
-            ...(activeTab === 'info' ? styles.activeTab : {}),
-            cursor: selectedTimes.length === 0 ? "not-allowed" : "pointer"
-          }}
-          onClick={() => setActiveTab('info')}
-          disabled={selectedTimes.length === 0}
-          title="Enter Info"
-        >
-          <FaUser />
-        </button>
+        <button style={{...styles.tabButton, ...(activeTab==='datetime'?styles.activeTab:{})}} onClick={()=>setActiveTab('datetime')} title="Choose Date & Time"><FaCalendarAlt/></button>
+        <button style={{...styles.tabButton, ...(activeTab==='info'?styles.activeTab:{})}} onClick={()=>setActiveTab('info')} title="Enter Info"><FaUser/></button>
       </div>
     </div>
   );
@@ -357,6 +389,12 @@ const styles = {
     color: '#fff',
     border: '1px solid #007bff'
   },
+  disabledTime: {
+  backgroundColor: "#eee",
+  color: "#999",
+  cursor: "not-allowed",
+  textDecoration: "line-through"
+  },
   selectedText: {
     marginTop: '1rem',
     padding: '0.75rem',
@@ -407,5 +445,13 @@ const styles = {
     border: 'none',
     fontSize: '1.2rem',
     cursor: 'pointer'
-  }
+  },
+  selectedDateDisplay: {
+  marginBottom: '1rem',
+  padding: '0.75rem',
+  borderRadius: '4px',
+  fontWeight: 'bold',
+  color: '#333',
+  fontSize: '0.95rem'
+}
 };
